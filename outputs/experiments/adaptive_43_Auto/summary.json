@@ -1,0 +1,97 @@
+{
+  "config": {
+    "seed": 43,
+    "noise": 0.12,
+    "policy": "Auto",
+    "scheduler": "Priority",
+    "transport": "GBN",
+    "window": 4,
+    "rx_capacity": 8,
+    "process_delay": 0.002,
+    "payload": 256,
+    "rto": 8.0,
+    "max_retries": 10,
+    "downlink_slowdown": 1.0,
+    "length": 100.0,
+    "attenuation": 0.1,
+    "modulation": "BPSK"
+  },
+  "simulated_seconds": 210.4720095,
+  "generated": 24,
+  "delivered": 24,
+  "success_rate": 1.0,
+  "acked": 24,
+  "failed": 0,
+  "goodput_bps": 175.14918058498415,
+  "queue_peak": {
+    "up1": 9,
+    "down1": 1,
+    "up2": 0,
+    "down2": 0,
+    "up3": 0,
+    "down3": 0,
+    "up4": 2,
+    "down4": 1
+  },
+  "modes": {
+    "up1": "Balanced",
+    "down1": "Fast",
+    "up2": "Fast",
+    "down2": "Fast",
+    "up3": "Fast",
+    "down3": "Fast",
+    "up4": "Fast",
+    "down4": "Fast"
+  },
+  "mode_changes": [
+    {
+      "time": 16.685334333333333,
+      "kind": "mode_changed",
+      "lane": "up1",
+      "old": "Fast",
+      "new": "Balanced",
+      "reason": "two poor decoder/pilot reports or ACK timeouts"
+    },
+    {
+      "time": 26.77333433333333,
+      "kind": "mode_changed",
+      "lane": "up1",
+      "old": "Balanced",
+      "new": "Survival",
+      "reason": "two poor decoder/pilot reports or ACK timeouts"
+    },
+    {
+      "time": 34.850668166666665,
+      "kind": "mode_changed",
+      "lane": "down4",
+      "old": "Fast",
+      "new": "Balanced",
+      "reason": "two poor decoder/pilot reports or ACK timeouts"
+    },
+    {
+      "time": 98.34400149999998,
+      "kind": "mode_changed",
+      "lane": "down4",
+      "old": "Balanced",
+      "new": "Fast",
+      "reason": "eight clean high-SNR reports"
+    },
+    {
+      "time": 103.67200099999997,
+      "kind": "mode_changed",
+      "lane": "up1",
+      "old": "Survival",
+      "new": "Balanced",
+      "reason": "eight clean high-SNR reports"
+    }
+  ],
+  "physical_transmissions": 208,
+  "DATA": 56,
+  "corrected_codewords": 83,
+  "detected_uncorrectable": 2,
+  "LINK_REPORT": 104,
+  "delivered_bits": 36864,
+  "ACK": 48,
+  "damaged_frames": 6,
+  "retransmissions": 6
+}

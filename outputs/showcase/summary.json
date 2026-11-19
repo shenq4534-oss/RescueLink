@@ -1,0 +1,107 @@
+{
+  "config": {
+    "seed": 42,
+    "noise": 0.12,
+    "policy": "Auto",
+    "scheduler": "Priority",
+    "transport": "GBN",
+    "window": 8,
+    "rx_capacity": 8,
+    "process_delay": 0.002,
+    "payload": 256,
+    "rto": 8.0,
+    "max_retries": 10,
+    "downlink_slowdown": 2,
+    "length": 100.0,
+    "attenuation": 0.1,
+    "modulation": "BPSK"
+  },
+  "simulated_seconds": 910.6706726666669,
+  "generated": 9,
+  "delivered": 9,
+  "success_rate": 1.0,
+  "acked": 9,
+  "failed": 0,
+  "goodput_bps": 53.41118525050352,
+  "queue_peak": {
+    "up1": 8,
+    "down1": 6,
+    "up2": 9,
+    "down2": 6,
+    "up3": 2,
+    "down3": 1,
+    "up4": 4,
+    "down4": 16
+  },
+  "modes": {
+    "up1": "Fast",
+    "down1": "Fast",
+    "up2": "Fast",
+    "down2": "Fast",
+    "up3": "Fast",
+    "down3": "Fast",
+    "up4": "Fast",
+    "down4": "Fast"
+  },
+  "mode_changes": [
+    {
+      "time": 42.35466916666667,
+      "kind": "mode_changed",
+      "lane": "down4",
+      "old": "Fast",
+      "new": "Balanced",
+      "reason": "two poor decoder/pilot reports or ACK timeouts"
+    },
+    {
+      "time": 51.27466916666667,
+      "kind": "mode_changed",
+      "lane": "down4",
+      "old": "Balanced",
+      "new": "Survival",
+      "reason": "two poor decoder/pilot reports or ACK timeouts"
+    },
+    {
+      "time": 52.23466866666667,
+      "kind": "mode_changed",
+      "lane": "up4",
+      "old": "Fast",
+      "new": "Balanced",
+      "reason": "two poor decoder/pilot reports or ACK timeouts"
+    },
+    {
+      "time": 163.5946686666666,
+      "kind": "mode_changed",
+      "lane": "up4",
+      "old": "Balanced",
+      "new": "Fast",
+      "reason": "eight clean high-SNR reports"
+    },
+    {
+      "time": 177.26933583333326,
+      "kind": "mode_changed",
+      "lane": "down4",
+      "old": "Survival",
+      "new": "Balanced",
+      "reason": "eight clean high-SNR reports"
+    },
+    {
+      "time": 229.49333583333316,
+      "kind": "mode_changed",
+      "lane": "down4",
+      "old": "Balanced",
+      "new": "Fast",
+      "reason": "eight clean high-SNR reports"
+    }
+  ],
+  "physical_transmissions": 292,
+  "DATA": 78,
+  "corrected_codewords": 11,
+  "detected_uncorrectable": 0,
+  "LINK_REPORT": 146,
+  "delivered_bits": 48640,
+  "ACK": 65,
+  "damaged_frames": 7,
+  "NACK": 3,
+  "retransmissions": 6,
+  "duplicates": 1
+}
