@@ -1,5 +1,7 @@
 # RescueLink · 自适应可靠应急通信
 
+GitHub：[shenq4534-oss/RescueLink](https://github.com/shenq4534-oss/RescueLink) · Public（按仓库所有者选择）。[自动化测试](https://github.com/shenq4534-oss/RescueLink/actions)
+
 离线 Python 课程项目。实际生成采样载波，经老师原版 `Cable.transmit()` 加噪，再解调、纠错和校验。核心库不依赖 Streamlit 启动，不需要任何云服务。
 
 |要求|实现|
@@ -70,6 +72,6 @@ UI 使用有界分步推进，暂停时仍可提交新消息，避免后台线�
 
 ## 两人协作
 
-建议一人负责 physical/protocol，一人负责 network/media/UI；共同检查 experiments 与 tests。每个功能用独立分支和 PR，合并前运行 pytest 和 quick 实验。见 [协作说明](docs/COLLABORATION.md)。仓库默认应设为 **Private**，再邀请搭档。
+建议一人负责 physical/protocol，一人负责 network/media/UI；共同检查 experiments 与 tests。每个功能用独立分支和 PR，合并前运行 pytest 和 quick 实验。见 [协作说明](docs/COLLABORATION.md)。当前仓库为 **Public**；所有者可以在 Settings → Collaborators 中邀请搭档获得写入权限。
 
 课程材料期限：代码、PPT 和其他材料 **12 月 18 日 14:00** 上传 BB；报告 **12 月 28 日 23:59**；展示 **5 分钟**。本工程未代为上传 BB。

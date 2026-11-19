@@ -14,7 +14,7 @@
 |python experiments/run_all.py --quick|E1–E7与预览对照完成，51行标量结果，7张PNG，原始JSON/CSV与详细链路日志|
 |python -m streamlit run app.py --server.headless true|服务实际启动；浏览器看到网络接收图片与SHA校验；AppTest验证文本、状态、图片、SOS、完整Demo、停止、重置|
 
-`--full` 的执行路径已提供，本次没有运行全量实验。GitHub Actions 文件已准备，远程 CI 尚未运行。
+`--full` 的执行路径已提供，本次没有运行全量实验。GitHub Actions 已在 Ubuntu / Python 3.12 上成功执行安装依赖和 pytest：[验收代码提交 a1068fe 的 CI](https://github.com/shenq4534-oss/RescueLink/actions/runs/44499496506)。最新状态见仓库 Actions 页面。
 
 ## Showcase
 
@@ -78,6 +78,6 @@ Priority 有真实 backlog，降低 SOS 等待，但延长普通图片完成时�
 - outputs/level1/results.json、outputs/level2/、outputs/showcase/：独立 Demo 的真实记录。
 - outputs/experiments/results.json、results.csv、*.png：详细实验配置与结果。
 - 原版 Cable SHA-256：`bf668db7212f485aef14c8878c61c28943074b2ec57f19013039b169b1a5b1b7`；与 Desktop/project 原文件核对一致。
-- GitHub：本地仓库已初始化。远程建仓未完成：GitHub连接未建立，本机凭据管理器拒绝访问，浏览器建仓页面访问失败。需要用户连接GitHub后继续创建私有仓库和推送；未声称已经发布。
+- GitHub：已发布至 https://github.com/shenq4534-oss/RescueLink ，按用户选择保持 Public。本地 origin 已改为该仓库；验收代码 a1068fe 已核对远程提交一致，Ubuntu CI 成功。搭档尚未邀请。
 - 尚需人工：搭档账号与邀请、真实录屏、PPT排版、报告、BB上传。没有制作正式PPT或代为提交。
 - 理想同步、冗长保护头、反馈开销、保守RTO、没有无线/MIMO、Full未跑等限制见 README/PROTOCOL/EXPERIMENTS。
