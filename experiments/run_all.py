@@ -129,6 +129,21 @@ def chart(path,xlabel,ylabel,series):
     ax.set(xlabel=xlabel,ylabel=ylabel)
     ax.grid(alpha=.25); ax.legend(fontsize=8); fig.tight_layout(); fig.savefig(path,dpi=160); plt.close(fig)
 
+def plot_shannon(results,root):
+    ref=[r for r in results["physical"] if r["mode"]=="Uncoded" and r["scheme"]=="BPSK"]
+    actual=results["noise_network"]
+    fig,axes=plt.subplots(1,2,figsize=(9,4))
+    axes[0].plot([r["noise"] for r in ref],[r["shannon_reference_bps"] for r in ref],"o-")
+    axes[0].set(title="Shannon reference (assumed B=24 kHz)",ylabel="Reference bit/s")
+    axes[1].plot([r["noise"] for r in actual],[r["goodput_bps"] for r in actual],"o-",color="#e66b57")
+    axes[1].set(title="Measured star-network goodput",ylabel="Delivered application bit/s")
+    for ax in axes:
+        ax.set_xlabel("Noise standard deviation")
+        ax.grid(alpha=.25)
+    fig.tight_layout()
+    fig.savefig(root/"e2_shannon.png",dpi=160)
+    plt.close(fig)
+
 def run(quick=True,output="outputs/experiments"):
     root=Path(output); root.mkdir(parents=True,exist_ok=True)
     results={"generated_utc":datetime.now(timezone.utc).isoformat(),"quick":quick,
@@ -150,10 +165,7 @@ def run(quick=True,output="outputs/experiments"):
     def lines(metric,modes=("Uncoded",),schemes=("BPSK","ASK","BFSK")):
         return [(f"{s}/{m}",[r["noise"] for r in physical if r["mode"]==m and r["scheme"]==s],
                  [r[metric] for r in physical if r["mode"]==m and r["scheme"]==s]) for s in schemes for m in modes]
-    ref=[r for r in physical if r["mode"]=="Uncoded" and r["scheme"]=="BPSK"]
-    chart(root/"e2_shannon.png","Noise standard deviation","bit/s (different theoretical/operational meanings)",
-          [("Shannon reference (24 kHz)",[r["noise"] for r in ref],[r["shannon_reference_bps"] for r in ref]),
-           ("Star network application goodput",[r["noise"] for r in results["noise_network"]],[r["goodput_bps"] for r in results["noise_network"]])])
+    plot_shannon(results,root)
     chart(root/"e3_modulations.png","Noise standard deviation","Raw BER (payload, before FEC)",lines("raw_ber"))
     chart(root/"e4_coding.png","Noise standard deviation","Frame error rate",lines("fer",modes=("Uncoded","Hamming"),schemes=("BPSK",)))
     chart(root/"e4_goodput.png","Noise standard deviation","Single-link delivered payload bit/s",lines("link_goodput_bps",modes=("Uncoded","Hamming"),schemes=("BPSK",)))
