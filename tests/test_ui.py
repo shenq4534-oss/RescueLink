@@ -35,16 +35,35 @@ def test_ui_showcase_and_response():
     assert app.session_state["net"].summary()["mode_changes"]
     app.session_state["net"].close()
 
-def test_ui_layer_lab_and_four_steps():
-    app=AppTest.from_file(Path(__file__).resolve().parents[1]/"app.py",default_timeout=20).run()
-    next(r for r in app.radio if r.label=="演示视图").set_value("底层实验室").run()
-    app.slider[0].set_value(0.0).run()
-    app.text_area[0].set_value("SOS 中文救援"*8).run()
-    button(app,"运行逐层实验").click().run()
+def test_recording_pages_and_level1_real_reassembly():
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/"app.py",default_timeout=30).run()
+    next(r for r in app.radio if r.label=="展示页面").set_value("Level 1 · 点对点").run()
+    button(app,"开始点对点传输").click().run()
+    for _ in range(20):
+        if app.session_state["p2p"].done:
+            break
+        button(app,"单步发送一个分片").click().run()
     assert not app.exception
-    result=app.session_state["lab_result"]
-    assert result["success"] and result["cable_calls"]==result["fragments"]>1
-    for step in ("2 成帧→编码","3 调制→Cable","4 解调→校验"):
-        next(r for r in app.radio if r.label=="查看步骤").set_value(step).run()
-        assert not app.exception
+    assert app.session_state["p2p"].success
+    assert app.session_state["p2p"].link.calls>1
+    next(r for r in app.radio if r.label=="展示页面").set_value("Level 2 · 星形转发").run()
+    button(app,"载入 Level 2 场景").click().run()
+    app.session_state["net"].run()
+    app.run()
+    assert not app.exception
+    assert app.session_state["net"].summary()["delivered"]==3
+    next(r for r in app.radio if r.label=="展示页面").set_value("实验与对照").run()
+    assert not app.exception
     app.session_state["net"].close()
+
+def test_live_noise_is_applied_without_resetting_flows():
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/"app.py",default_timeout=30).run()
+    button(app,"开始图片上传").click().run()
+    net=app.session_state["net"]
+    button(app,"加入干扰 σ=0.85").click().run()
+    assert app.session_state["net"] is net
+    assert all(link.cable.noise_level==.85 for link in net.links.values())
+    button(app,"恢复链路 σ=0.12").click().run()
+    assert all(link.cable.noise_level==.12 for link in net.links.values())
+    assert net.flows and not app.exception
+    net.close()

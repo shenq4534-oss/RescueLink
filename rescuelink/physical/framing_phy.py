@@ -24,7 +24,7 @@ def encode(raw, mode, scheme="BPSK"):
     prefix = modulate(np.concatenate([PREAMBLE, np.repeat(to_bits(h), 3)]), spb=HEADER_SPB)
     return np.concatenate([prefix, modulate(coded, scheme, mode.spb)]), coded
 
-def decode(signal, trace=None):
+def decode(signal):
     if len(signal) < PREFIX_SAMPLES:
         raise ValueError("short PHY")
     p = demodulate(signal[:PREFIX_SAMPLES], spb=HEADER_SPB)
@@ -51,9 +51,4 @@ def decode(signal, trace=None):
     scheme = next(k for k, val in SCHEMES.items() if val == sid)
     raw_bits = demodulate(signal[PREFIX_SAMPLES:], scheme, spb, gain)
     bits, stats = coding.decode(raw_bits) if fec else (raw_bits, coding.DecodeStats())
-    if trace is not None:
-        trace.update(phy_header_rx=dict(version=v, modulation=scheme, fec=bool(fec),
-                     samples_per_bit=spb, frame_bytes=size),
-                     coded_bits_rx="".join(map(str, raw_bits.tolist())),
-                     decoder_candidate_hex=from_bits(bits).hex())
     return from_bits(bits), stats, raw_bits, snr
