@@ -7,9 +7,10 @@ from rescuelink.protocol.fragmentation import split, Reassembler
 from rescuelink.protocol.application import Message
 from rescuelink.media.image_transfer import demo_image
 
-def level1(data="Hello · 救援链路".encode(), noise=.15, payload=128, scheme="BPSK"):
+def level1(data="Hello · 救援链路".encode(), noise=.15, payload=128, scheme="BPSK",
+           mode="Balanced", capture=False, seed=42):
     config = Config(noise=noise)
-    link = PhysicalLink(config, 42, "point-to-point")
+    link = PhysicalLink(config, seed, "point-to-point", capture)
     parts = split(data, payload)
     rx = Reassembler(len(parts))
     restored = None
@@ -17,13 +18,15 @@ def level1(data="Hello · 救援链路".encode(), noise=.15, payload=128, scheme
     try:
         for i, part in enumerate(parts):
             frame = Frame(Kind.DATA, 1, 4, 2, 1, i, i, len(parts), payload=part)
-            r = link.transmit(frame.pack(), MODES["Balanced"], scheme)
+            r = link.transmit(frame.pack(), MODES[mode], scheme)
             records.append({k:v for k,v in r.items() if k not in ("raw", "tx", "rx")})
             if r["ok"]:
                 f = Frame.unpack(r["raw"])
                 restored = rx.add(f.index, f.count, f.payload)
         duration = sum(r["duration"]+r["propagation"] for r in records)
-        return dict(success=restored == data, fragments=len(parts), received_hex=restored.hex() if restored is not None else None,
+        return dict(success=restored == data, fragments=len(parts), sent_hex=data.hex(),
+                    mode=mode, scheme=scheme, noise=noise, seed=seed, cable_calls=link.calls,
+                    received_hex=restored.hex() if restored is not None else None,
                     goodput_bps=(len(data)*8/duration if restored == data else 0), simulated_seconds=duration,
                     records=records)
     finally:

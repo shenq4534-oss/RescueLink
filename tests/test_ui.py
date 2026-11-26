@@ -34,3 +34,17 @@ def test_ui_showcase_and_response():
     assert any(i["verified"] for i in app.session_state["net"].hosts[4].images.values())
     assert app.session_state["net"].summary()["mode_changes"]
     app.session_state["net"].close()
+
+def test_ui_layer_lab_and_four_steps():
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/"app.py",default_timeout=20).run()
+    next(r for r in app.radio if r.label=="演示视图").set_value("底层实验室").run()
+    app.slider[0].set_value(0.0).run()
+    app.text_area[0].set_value("SOS 中文救援"*8).run()
+    button(app,"运行逐层实验").click().run()
+    assert not app.exception
+    result=app.session_state["lab_result"]
+    assert result["success"] and result["cable_calls"]==result["fragments"]>1
+    for step in ("2 成帧→编码","3 调制→Cable","4 解调→校验"):
+        next(r for r in app.radio if r.label=="查看步骤").set_value(step).run()
+        assert not app.exception
+    app.session_state["net"].close()

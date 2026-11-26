@@ -4,7 +4,7 @@ Only successfully decoded bytes cross a simulated cable's receive boundary.
 Control reports, ACKs and application responses use the same physical pipeline.
 """
 from dataclasses import asdict
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 import json
 import threading
@@ -23,7 +23,7 @@ from .switch import Switch
 from .scheduler import PortQueue
 
 class Network:
-    def __init__(self, config=None, output_dir="outputs/received", fault=None):
+    def __init__(self, config=None, output_dir="outputs/received", fault=None, capture=False):
         self.config = config or Config()
         self.clock = Clock()
         self.hosts = {a: Host(a) for a in HOSTS}
@@ -32,13 +32,14 @@ class Network:
         for a in self.hosts:
             for direction in ("up", "down"):
                 name = f"{direction}{a}"
-                self.links[name] = PhysicalLink(self.config, self.config.seed + a*17 + (direction == "down")*101, name)
+                self.links[name] = PhysicalLink(self.config, self.config.seed + a*17 + (direction == "down")*101, name, capture)
                 self.controllers[name] = AdaptiveController(self.config.policy)
                 self.queues[name] = self.switch.queues[a] if direction == "down" else PortQueue("Priority")
                 self.busy[name] = False
         self.flows, self.receivers = {}, {}
         self.next_id = 1
         self.events, self.attempts = [], []
+        self.traces = deque(maxlen=80)
         self.stats = Counter()
         self.output_dir = Path(output_dir)
         self.fault = fault  # explicit integration-test-only loss hook, after real Cable
@@ -148,11 +149,19 @@ class Network:
         arrival = end + result["propagation"]
         if self.fault and self.fault(lane, frame, len(self.attempts)):
             result.update(ok=False, raw=None, error="test injected loss AFTER original Cable")
-        record = {k: v for k, v in result.items() if k not in ("tx", "rx", "raw")}
+        record = {k: v for k, v in result.items() if k not in ("tx", "rx", "raw", "trace")}
         record.update(start=self.now, end=end, arrival=arrival, lane=lane, mode=mode.name,
                       frame_type=frame.kind.name, src=frame.src, dst=frame.dst,
                       message_id=frame.message_id, sequence=frame.sequence, frame_bytes=len(frame.pack()),
                       queue_wait=self.now-enqueued)
+        if "trace" in result:
+            trace = result["trace"]
+            trace.update(start=self.now, end=end, src=frame.src, dst=frame.dst,
+                         message_id=frame.message_id, sequence=frame.sequence, frame_type=frame.kind.name)
+            if not result["ok"]:
+                trace.update(ok=False, error=result["error"], payload_hex_rx=None, frame_sha256_rx=None)
+            self.traces.append(trace)
+            record.update(frame_sha256_tx=trace["frame_sha256_tx"], frame_sha256_rx=trace["frame_sha256_rx"])
         self.attempts.append(record)
         self.stats["physical_transmissions"] += 1
         self.stats[frame.kind.name] += 1

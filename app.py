@@ -9,6 +9,7 @@ from rescuelink.protocol.application import Message
 from rescuelink.media.image_transfer import demo_image
 from rescuelink.simulation.scenarios import configure_showcase
 from rescuelink.simulation.metrics import network_metrics
+from rescuelink.ui.inspector import point_to_point_lab, network_inspector
 
 st.set_page_config(page_title="RescueLink · 应急通信",page_icon="📡",layout="wide")
 st.markdown("""<style>.stApp{background:#0c1823}h1,h2,h3{letter-spacing:.02em}
@@ -16,6 +17,7 @@ st.markdown("""<style>.stApp{background:#0c1823}h1,h2,h3{letter-spacing:.02em}
 .block-container{padding-top:2rem}</style>""",unsafe_allow_html=True)
 st.title("RescueLink")
 st.caption("自适应可靠应急通信网络 · 4 Hosts / 1 Switch / 8 directed Cables")
+view=st.radio("演示视图",["应急网络","底层实验室"],horizontal=True)
 
 with st.sidebar:
     st.subheader("新场景配置")
@@ -30,11 +32,17 @@ with st.sidebar:
     seed=st.number_input("随机种子",min_value=0,max_value=100000,value=42)
     st.caption("修改后点击“应用配置 / 重置”。所有时间均为模拟秒。")
 
+if view=="底层实验室":
+    # Preserve the network snapshot while inspecting a separate point-to-point link.
+    st.session_state.playing=False
+    point_to_point_lab(noise,modulation,int(seed))
+    st.stop()
+
 def new_network():
     if "net" in st.session_state:
         st.session_state.net.close()
     st.session_state.net=Network(Config(seed=int(seed),noise=noise,policy=policy,scheduler=scheduling,
-        transport=transport,window=window,downlink_slowdown=slowdown,modulation=modulation),"outputs/ui_received")
+        transport=transport,window=window,downlink_slowdown=slowdown,modulation=modulation),"outputs/ui_received",capture=True)
     st.session_state.playing=False
     st.session_state.counter=0
 
@@ -113,7 +121,7 @@ def monitor():
     cols[2].metric("有效吞吐",f"{s['goodput_bps']:.1f} bit/s")
     cols[3].metric("重传 / 损坏帧",f"{s.get('retransmissions',0)} / {s.get('damaged_frames',0)}")
     cols[4].metric("Hamming 纠正码字",s.get("corrected_codewords",0))
-    receive,tech,charts=st.tabs(["接收端", "链路与事件", "已计算实验"])
+    receive,tech,wire,charts=st.tabs(["接收端", "链路与事件", "逐帧追踪", "已计算实验"])
     with receive:
         st.caption("以下内容只来自解调、CRC、分片重组通过后的接收字节。")
         for addr,host in n.hosts.items():
@@ -159,6 +167,8 @@ def monitor():
         important=[e.asdict() for e in n.events if e.kind not in ("link_feedback","window_advertised")]
         st.dataframe([dict(time=round(e["time"],4),kind=e["kind"],details=json.dumps({k:v for k,v in e.items() if k not in ("time","kind")},ensure_ascii=False)) for e in important[-100:]],hide_index=True)
         st.download_button("下载当前真实事件日志","\n".join(json.dumps(e.asdict(),ensure_ascii=False) for e in n.events),"events.jsonl")
+    with wire:
+        network_inspector(n)
     with charts:
         p=Path("outputs/experiments/results.json")
         if p.exists():
