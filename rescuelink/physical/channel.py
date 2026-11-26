@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from collections import deque
 from threading import Lock
 from pathlib import Path
 import hashlib
@@ -25,6 +26,7 @@ class PhysicalLink:
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cable-" + name)
         self.calls = 0
         self.last = None
+        self.traces = deque(maxlen=16)
         self.capture = capture
         self.source_hash = hashlib.sha256(Path(inspect.getfile(Cable)).read_bytes()).hexdigest() if capture else None
 
@@ -65,7 +67,7 @@ class PhysicalLink:
                 body_tx=waveform[body_start:body_start+24*mode.spb].tolist(),
                 body_rx=received[body_start:body_start+24*mode.spb].tolist())
         result = dict(ok=False, error="", corrected_codewords=0, detected_uncorrectable=0,
-                      raw_errors=0, coded_bits=len(coded), information_bits=len(raw)*8,
+                      trace_id=self.calls, raw_errors=0, coded_bits=len(coded), information_bits=len(raw)*8,
                       samples=len(waveform), snr_linear=None, raw=None, post_errors=None,
                       duration=len(waveform)/SAMPLE_RATE*slowdown,
                       propagation=self.cable.get_propagation_delay(),
@@ -92,6 +94,9 @@ class PhysicalLink:
                          corrected_codewords=result["corrected_codewords"],
                          detected_uncorrectable=result["detected_uncorrectable"])
             result["trace"] = trace
+            self.traces.append(dict(trace, trace_id=self.calls,
+                tx_payload=result["tx_payload"], rx_payload=result["rx_payload"],
+                raw=result["raw"]))
         self.last = result
         return result
 

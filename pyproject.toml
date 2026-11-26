@@ -12,6 +12,7 @@ requires-python = ">=3.11"
 include = ["rescuelink*"]
 
 [tool.pytest.ini_options]
+addopts = "--basetemp=.pytest_tmp"
 pythonpath = ["."]
 testpaths = ["tests"]
 markers = ["unit: isolated codec and state tests", "integration: end-to-end protocol", "physical_channel: original teacher Cable"]
