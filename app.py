@@ -1,282 +1,1332 @@
-"""RescueLink recording console. Run: python -m streamlit run app.py."""
+"""RescueLink recording console.
+
+Run:
+    python -m streamlit run app.py
+"""
+
 from html import escape
 from pathlib import Path
 import json
+
 import streamlit as st
+
 from rescuelink.config import Config, HOSTS
-from rescuelink.console_views import html, heading, metrics, receiver, inbox, diagnostics, point_monitor
-from rescuelink.presentation import PointToPointSession, advance, timeline_html, topology_html
+from rescuelink.console_views import (
+    html,
+    heading,
+    metrics,
+    receiver,
+    inbox,
+    diagnostics,
+    point_monitor,
+)
+from rescuelink.presentation import (
+    PointToPointSession,
+    advance,
+    timeline_html,
+)
 from rescuelink.network.engine import Network
+from rescuelink.protocol.frame import Frame
 from rescuelink.protocol.application import Message
 from rescuelink.media.image_transfer import demo_image
 from rescuelink.simulation.scenarios import configure_showcase
 from rescuelink.simulation.metrics import network_metrics
 
+
 ROOT = Path(__file__).resolve().parent
-st.set_page_config(page_title="RescueLink · 应急通信指挥台",page_icon="📡",layout="wide",initial_sidebar_state="collapsed")
-html('<style>'+ (ROOT/'assets/console.css').read_text(encoding='utf-8')+'</style>')
+
+st.set_page_config(
+    page_title="RescueLink · 应急通信指挥台",
+    page_icon="📡",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+html(
+    "<style>"
+    + (ROOT / "assets/console.css").read_text(encoding="utf-8")
+    + "</style>"
+)
+
+
+# ============================================================
+# 侧栏配置
+# ============================================================
 
 with st.sidebar:
-    st.markdown('### 场景配置')
-    st.caption('配置在重置后生效；即时干扰按钮直接作用于当前网络。')
-    noise=st.slider('噪声标准差',0.0,2.0,.15,.05)
-    policy=st.selectbox('通信保护',['Auto','Fixed Fast','Fixed Balanced','Fixed Survival'])
-    modulation=st.selectbox('调制',['BPSK','ASK','BFSK'])
-    scheduling=st.selectbox('交换机调度',['Priority','FIFO'])
-    transport=st.selectbox('可靠传输',['GBN','Stop-and-Wait'])
-    window=st.slider('发送窗口',1,16,8)
-    slowdown=st.slider('下行符号时长倍率（形成拥塞）',1,4,2)
-    seed=st.number_input('随机种子',min_value=0,max_value=100000,value=42)
-    st.caption('Fast 无载荷 FEC；Balanced / Survival 使用 Hamming(8,4)。固定 PHY 头始终保护。')
-    st.divider()
-    speed=st.select_slider('播放速度',options=[4,12,32,64],value=12,
-        format_func=lambda x:{4:'讲解 · 慢速',12:'标准',32:'快速',64:'验收 · 快速完成'}[x])
-    st.caption('每次刷新推进的事件数；不改变网络的模拟时延或吞吐率。')
-    recording=st.toggle('录制模式',value=False)
-    st.caption('减少辅助信息，保留实际结果和通信指标。')
+    st.markdown("### 场景配置")
+    st.caption("配置在重置后生效；即时干扰按钮直接作用于当前网络。")
 
+    noise = st.slider(
+        "噪声标准差",
+        0.0,
+        2.0,
+        0.15,
+        0.05,
+    )
+
+    policy = st.selectbox(
+        "通信保护",
+        [
+            "Auto",
+            "Fixed Fast",
+            "Fixed Balanced",
+            "Fixed Survival",
+        ],
+    )
+
+    modulation = st.selectbox(
+        "调制",
+        ["BPSK", "ASK", "BFSK"],
+    )
+
+    scheduling = st.selectbox(
+        "交换机调度",
+        ["Priority", "FIFO"],
+    )
+
+    transport = st.selectbox(
+        "可靠传输",
+        ["GBN", "Stop-and-Wait"],
+    )
+
+    window = st.slider(
+        "发送窗口",
+        1,
+        16,
+        8,
+    )
+
+    slowdown = st.slider(
+        "下行符号时长倍率（形成拥塞）",
+        1,
+        4,
+        2,
+    )
+
+    seed = st.number_input(
+        "随机种子",
+        min_value=0,
+        max_value=100000,
+        value=42,
+    )
+
+    st.caption(
+        "Fast 无载荷 FEC；Balanced / Survival 使用 Hamming(8,4)。"
+        "固定 PHY 头始终保护。"
+    )
+
+    st.divider()
+
+    speed = st.select_slider(
+        "播放速度",
+        options=[4, 12, 32, 64],
+        value=12,
+        format_func=lambda x: {
+            4: "讲解 · 慢速",
+            12: "标准",
+            32: "快速",
+            64: "验收 · 快速完成",
+        }[x],
+    )
+
+    st.caption(
+        "每次刷新推进的事件数；不改变网络的模拟时延或吞吐率。"
+    )
+
+    recording = st.toggle(
+        "录制模式",
+        value=False,
+    )
+
+    st.caption(
+        "减少辅助信息，保留实际结果和通信指标。"
+    )
+
+
+# ============================================================
+# 教材式星形拓扑
+# ============================================================
+
+def topology_html(net):
+    """白底、矩形设备、直线连接；活动标记来自实际传输时间。"""
+
+    active = {}
+
+    for attempt in net.attempts:
+        if attempt["start"] <= net.now < attempt["end"]:
+            active.setdefault(attempt["lane"], attempt)
+
+    # 地址: 主机矩形 x/y/w/h、主机连接点、交换机连接点
+    positions = {
+        1: (
+            300, 8, 160, 56,
+            (380, 64),
+            (380, 155),
+        ),
+        2: (
+            16, 168, 160, 56,
+            (176, 196),
+            (310, 196),
+        ),
+        3: (
+            300, 328, 160, 56,
+            (380, 328),
+            (380, 237),
+        ),
+        4: (
+            584, 168, 160, 56,
+            (584, 196),
+            (450, 196),
+        ),
+    }
+
+    svg = [
+        (
+            '<div class="topology">'
+            '<svg viewBox="0 0 760 408" '
+            'role="img" '
+            'aria-label="四主机与中心交换机组成的星形网络">'
+        ),
+        '<rect width="760" height="408" fill="white"/>',
+        (
+            '<g font-family="Times New Roman, SimSun, serif" '
+            'fill="#20252a">'
+        ),
+    ]
+
+    for addr, values in positions.items():
+        x, y, w, h, host, switch = values
+
+        lanes = [
+            f"up{addr}",
+            f"down{addr}",
+        ]
+
+        selected = [
+            active[lane]
+            for lane in lanes
+            if lane in active
+        ]
+
+        color = "#245d91" if selected else "#68717a"
+        width = 2.4 if selected else 1.4
+
+        svg.append(
+            f'<line x1="{host[0]}" y1="{host[1]}" '
+            f'x2="{switch[0]}" y2="{switch[1]}" '
+            f'stroke="{color}" stroke-width="{width}"/>'
+        )
+
+        for attempt in selected:
+            if attempt["lane"].startswith("up"):
+                start, end = host, switch
+            else:
+                start, end = switch, host
+
+            duration = max(
+                attempt["end"] - attempt["start"],
+                1e-12,
+            )
+
+            fraction = (
+                net.now - attempt["start"]
+            ) / duration
+
+            px = start[0] + (end[0] - start[0]) * fraction
+            py = start[1] + (end[1] - start[1]) * fraction
+
+            # 短刻线表示当前模拟时刻的帧位置。
+            if start[0] != end[0]:
+                dx, dy = 0, 5
+            else:
+                dx, dy = 5, 0
+
+            svg.append(
+                f'<line x1="{px-dx:.1f}" y1="{py-dy:.1f}" '
+                f'x2="{px+dx:.1f}" y2="{py+dy:.1f}" '
+                'stroke="#245d91" stroke-width="3"/>'
+            )
+
+        queued = sum(
+            len(net.queues[lane])
+            for lane in lanes
+        )
+
+        if net.closed:
+            state = "已停止"
+        elif selected:
+            state = "传输中"
+        elif queued:
+            state = f"排队 {queued}"
+        else:
+            state = "空闲"
+
+        label = escape(HOSTS[addr])
+
+        svg.append(
+            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" '
+            'fill="white" stroke="#252b31" stroke-width="1.4"/>'
+            f'<text x="{x+w/2}" y="{y+23}" '
+            f'text-anchor="middle" font-size="16">{label}</text>'
+            f'<text x="{x+w/2}" y="{y+43}" '
+            'text-anchor="middle" font-size="12" fill="#626b74">'
+            f'地址 {addr} · {state}</text>'
+        )
+
+    svg.append(
+        '<rect x="310" y="155" width="140" height="82" '
+        'fill="white" stroke="#252b31" stroke-width="1.6"/>'
+        '<text x="380" y="188" text-anchor="middle" '
+        'font-size="17">中心交换机</text>'
+        '<text x="380" y="210" text-anchor="middle" '
+        'font-size="13">目的地址 → 端口</text>'
+    )
+
+    port_labels = [
+        (380, 149, "P1"),
+        (297, 201, "P2"),
+        (380, 253, "P3"),
+        (463, 201, "P4"),
+    ]
+
+    for x, y, label in port_labels:
+        svg.append(
+            f'<text x="{x}" y="{y}" text-anchor="middle" '
+            f'font-size="12">{label}</text>'
+        )
+
+    svg.append("</g></svg></div>")
+
+    return "".join(svg)
+
+
+# ============================================================
+# 真实通信记录
+# ============================================================
+
+def json_default(value):
+    """将实际记录中的 bytes / NumPy 数组转换为 JSON。"""
+
+    if isinstance(value, (bytes, bytearray)):
+        return {
+            "hex": bytes(value).hex(),
+            "bytes": len(value),
+        }
+
+    if hasattr(value, "tolist"):
+        return value.tolist()
+
+    return str(value)
+
+
+def communication_evidence(net):
+    """只展示已有记录，不重新生成或伪造接收数据。"""
+
+    with st.expander(
+        "通信证据 · 实际比特、帧和接收结果",
+        expanded=page == "Level 2 · 星形转发",
+    ):
+        st.caption(
+            "物理计算记录可早于模拟到达时间；"
+            "最终送达以接收事件和应用收件箱为准。"
+            "查看时建议先暂停。"
+        )
+
+        lane = st.selectbox(
+            "观察方向",
+            list(net.links),
+            key="evidence_lane",
+        )
+
+        link = net.links[lane]
+        records = list(getattr(link, "traces", []))
+
+        # 兼容尚未增加 traces 的旧版 channel.py。
+        if not records and link.last:
+            records = [link.last]
+
+        if not records:
+            st.info(
+                "这个方向尚未调用 Cable。"
+                "先发送消息并推进事件。"
+            )
+            return
+
+        index = st.selectbox(
+            "记录序号（从旧到新）",
+            list(range(len(records))),
+            index=len(records) - 1,
+            key="evidence_record",
+        )
+
+        record = records[index]
+
+        summary_keys = (
+            "trace_id",
+            "ok",
+            "error",
+            "information_bits",
+            "coded_bits",
+            "raw_errors",
+            "post_errors",
+            "corrected_codewords",
+            "detected_uncorrectable",
+        )
+
+        st.write({
+            key: record.get(key)
+            for key in summary_keys
+            if key in record
+        })
+
+        captured = False
+
+        # 展示 channel.py 实际保存的比特序列字段。
+        for key, value in record.items():
+            if "bit" not in key.lower():
+                continue
+
+            if hasattr(value, "tolist"):
+                value = value.tolist()
+
+            if (
+                isinstance(value, (list, tuple))
+                and value
+                and all(v in (0, 1) for v in value)
+            ):
+                value = "".join(
+                    str(int(v))
+                    for v in value
+                )
+
+            if (
+                isinstance(value, str)
+                and value
+                and set(value) <= {"0", "1", " ", "\n"}
+            ):
+                st.caption(
+                    f"{key} · 记录中的原始字段，"
+                    "显示前 512 个字符"
+                )
+
+                st.code(
+                    value[:512],
+                    language="text",
+                )
+
+                captured = True
+
+        if not captured:
+            st.info(
+                "当前 channel.py 未保存比特序列字段；"
+                "这里保留实际帧、采样和检错结果。"
+                "需要此前增加 traces 的版本来观察更多比特记录。"
+            )
+
+        raw = record.get("raw")
+
+        if isinstance(raw, (bytes, bytearray)):
+            st.caption(
+                "成功译码并通过帧校验的接收字节"
+                "（前 96 字节）"
+            )
+
+            st.code(
+                bytes(raw[:96]).hex(" "),
+                language="text",
+            )
+
+            st.caption(
+                "这些接收字节对应的比特"
+                "（前 32 字节；译码后的帧表示）"
+            )
+
+            st.code(
+                " ".join(
+                    f"{byte:08b}"
+                    for byte in raw[:32]
+                ),
+                language="text",
+            )
+
+            try:
+                frame = Frame.unpack(raw)
+
+                st.json({
+                    "type": frame.kind.name,
+                    "src": frame.src,
+                    "dst": frame.dst,
+                    "message_id": frame.message_id,
+                    "sequence": frame.sequence,
+                    "index": frame.index,
+                    "count": frame.count,
+                    "window": frame.window,
+                    "payload_bytes": len(frame.payload),
+                })
+
+            except ValueError as exc:
+                st.caption(
+                    f"这条记录无法解析为有效帧：{exc}"
+                )
+
+        st.caption(
+            "采样数组位于完整记录的 "
+            "tx / rx / tx_payload / rx_payload 字段。"
+        )
+
+        st.download_button(
+            "下载选中物理记录",
+            json.dumps(
+                record,
+                ensure_ascii=False,
+                indent=2,
+                default=json_default,
+            ),
+            f"{lane}_trace.json",
+            mime="application/json",
+            key="trace_download",
+        )
+
+        if net.flows:
+            st.markdown("**实际发送窗口**")
+
+            st.dataframe(
+                [
+                    {
+                        "消息": flow.message_id,
+                        "源": flow.src,
+                        "目的": flow.dst,
+                        "应用": flow.app_type,
+                        "已累计确认": flow.base,
+                        "下一发送序号": flow.next_seq,
+                        "未确认": flow.next_seq - flow.base,
+                        "接收窗口": flow.advertised,
+                        "总分片": len(flow.frames),
+                        "状态": flow.status,
+                    }
+                    for flow in net.flows.values()
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
+
+
+# ============================================================
+# 场景初始化
+# ============================================================
 
 def make_config():
-    return Config(seed=int(seed),noise=noise,policy=policy,scheduler=scheduling,
-        transport=transport,window=window,downlink_slowdown=slowdown,modulation=modulation)
+    return Config(
+        seed=int(seed),
+        noise=noise,
+        policy=policy,
+        scheduler=scheduling,
+        transport=transport,
+        window=window,
+        downlink_slowdown=slowdown,
+        modulation=modulation,
+    )
 
 
 def new_network():
-    if 'net' in st.session_state:
+    if "net" in st.session_state:
         st.session_state.net.close()
-    st.session_state.net=Network(make_config(),ROOT/'outputs/ui_received')
-    st.session_state.playing=False
-    st.session_state.counter=0
-    st.session_state.target=None
-    st.session_state.notice='场景已就绪 · 选择一个任务开始'
+
+    st.session_state.net = Network(
+        make_config(),
+        ROOT / "outputs/ui_received",
+    )
+
+    st.session_state.playing = False
+    st.session_state.counter = 0
+    st.session_state.target = None
+    st.session_state.notice = "场景已就绪 · 选择一个任务开始"
 
 
-if 'net' not in st.session_state:
+if "net" not in st.session_state:
     new_network()
 
-html('<div class="masthead"><div><div class="brandline"><span class="brandmark">+</span>'
-     '<span class="wordmark">RescueLink<span style="color:#c95939">.</span></span>'
-     '<span class="edition">COMMUNICATION LAB / 01</span></div>'
-     '<h1>让关键信息，先一步抵达。</h1><p>自适应可靠应急通信 · 从真实波形到现场图像</p></div>'
-     '<div class="header-aside"><span class="online-dot"></span>本地实验环境<br>'
-     '<span class="badge">4 HOSTS / 1 SWITCH</span><br>Level 1 → Level 2 → Level 3</div></div>')
-page=st.radio('展示页面',['指挥总览','Level 1 · 点对点','Level 2 · 星形转发','实验与对照'],
-              horizontal=True,label_visibility='collapsed')
-if recording:
-    html('<style>[data-testid="stToolbarActions"],[data-testid="stAppDeployButton"]{display:none}'
-         '.block-container{padding-top:1rem}.edition{display:none}'
-         '.masthead{margin-bottom:.6rem}.masthead h1{margin-top:8px;font-size:26px}'
-         '.metric-cell{padding-top:10px;padding-bottom:10px}.metric-value{font-size:24px}'
-         '.topology svg{max-height:270px}.event-list{max-height:195px}'
-         '.st-key-receiver_panel [data-testid="stImage"] img{max-height:180px;object-fit:contain}</style>')
+for key, default in {
+    "playing": False,
+    "counter": 0,
+    "target": None,
+    "notice": "场景已就绪",
+}.items():
+    st.session_state.setdefault(key, default)
 
+
+# ============================================================
+# 页头与导航
+# ============================================================
+
+html(
+    '<div class="masthead"><div>'
+    '<div class="brandline">'
+    '<span class="brandmark">+</span>'
+    '<span class="wordmark">RescueLink'
+    '<span style="color:#c95939">.</span></span>'
+    '<span class="edition">COMMUNICATION LAB / 01</span>'
+    "</div>"
+    "<h1>让关键信息，先一步抵达。</h1>"
+    "<p>自适应可靠应急通信 · 从真实波形到现场图像</p>"
+    "</div>"
+    '<div class="header-aside">'
+    '<span class="online-dot"></span>本地实验环境<br>'
+    '<span class="badge">4 HOSTS / 1 SWITCH</span><br>'
+    "Level 1 → Level 2 → Level 3"
+    "</div></div>"
+)
+
+page = st.radio(
+    "展示页面",
+    [
+        "Level 3 · 可靠应急通信",
+        "Level 1 · 点对点",
+        "Level 2 · 星形转发",
+        "实验与对照",
+    ],
+    horizontal=True,
+    label_visibility="collapsed",
+)
+
+if recording:
+    html(
+        "<style>"
+        '[data-testid="stToolbarActions"],'
+        '[data-testid="stAppDeployButton"]{display:none}'
+        ".block-container{padding-top:1rem}"
+        ".edition{display:none}"
+        ".masthead{margin-bottom:.6rem}"
+        ".masthead h1{margin-top:8px;font-size:26px}"
+        ".metric-cell{padding-top:10px;padding-bottom:10px}"
+        ".metric-value{font-size:24px}"
+        ".topology svg{max-height:270px}"
+        ".event-list{max-height:195px}"
+        '.st-key-receiver_panel [data-testid="stImage"] img'
+        "{max-height:180px;object-fit:contain}"
+        "</style>"
+    )
+
+
+# ============================================================
+# 网络运行控制
+# ============================================================
 
 def controls():
-    net=st.session_state.net
-    cols=st.columns([1.55,1,1.25,.9,1.2,.8])
-    if cols[0].button('运行完整 Demo',type='primary',use_container_width=True):
+    net = st.session_state.net
+
+    cols = st.columns([
+        1.55,
+        1,
+        1.25,
+        0.9,
+        1.2,
+        0.8,
+    ])
+
+    if cols[0].button(
+        "运行完整 Demo",
+        type="primary",
+        use_container_width=True,
+    ):
         new_network()
         configure_showcase(st.session_state.net)
-        st.session_state.playing=True
-        st.session_state.notice='完整场景运行中 · 22s 生成 SOS / 32s 加噪 / 55s 恢复'
-    net=st.session_state.net
-    if cols[1].button('暂停 / 继续',disabled=net.closed,use_container_width=True):
-        st.session_state.playing=not st.session_state.playing
-        st.session_state.target=None
-    if cols[2].button('单步推进 12 个事件',disabled=net.closed,use_container_width=True):
-        st.session_state.playing=False
-        st.session_state.target=None
+
+        st.session_state.playing = True
+        st.session_state.notice = (
+            "完整场景运行中 · "
+            "22s 生成 SOS / 32s 加噪 / 55s 恢复"
+        )
+
+    net = st.session_state.net
+
+    if cols[1].button(
+        "暂停 / 继续",
+        disabled=net.closed,
+        use_container_width=True,
+    ):
+        st.session_state.playing = (
+            not st.session_state.playing
+        )
+        st.session_state.target = None
+
+    if cols[2].button(
+        "单步推进 12 个事件",
+        disabled=net.closed,
+        use_container_width=True,
+    ):
+        st.session_state.playing = False
+        st.session_state.target = None
         net.step(12)
-    if cols[3].button('触发 SOS',disabled=net.closed,use_container_width=True):
-        st.session_state.counter+=1
-        net.send(3,4,Message('SOS_ALERT',f'sos-{st.session_state.counter}',{},'SOS：四区需要救援！'.encode()),0)
-        st.session_state.playing=True
-        st.session_state.notice='C → D 救援请求已提交，优先级 0'
-    if cols[4].button('应用配置 / 重置',use_container_width=True):
+
+    if cols[3].button(
+        "触发 SOS",
+        disabled=net.closed,
+        use_container_width=True,
+    ):
+        st.session_state.counter += 1
+
+        net.send(
+            3,
+            4,
+            Message(
+                "SOS_ALERT",
+                f"sos-{st.session_state.counter}",
+                {},
+                "SOS：四区需要救援！".encode(),
+            ),
+            0,
+        )
+
+        st.session_state.playing = True
+        st.session_state.notice = (
+            "C → D 救援请求已提交，优先级 0"
+        )
+
+    if cols[4].button(
+        "应用配置 / 重置",
+        use_container_width=True,
+    ):
         new_network()
         st.rerun()
-    if cols[5].button('停止任务',disabled=net.closed,use_container_width=True):
+
+    if cols[5].button(
+        "停止任务",
+        disabled=net.closed,
+        use_container_width=True,
+    ):
         net.close()
-        st.session_state.playing=False
-        st.session_state.notice='任务已停止，已关闭链路线程；重置可重新开始'
+        st.session_state.playing = False
+        st.session_state.notice = (
+            "任务已停止，已关闭链路线程；重置可重新开始"
+        )
 
 
-@st.fragment(run_every='500ms')
+# ============================================================
+# 自动刷新监视区
+# ============================================================
+
+@st.fragment(run_every="500ms")
 def network_monitor():
-    net=st.session_state.net
+    net = st.session_state.net
+
     if st.session_state.playing and not net.closed:
         try:
-            more,reached=advance(net,speed,st.session_state.target)
+            more, reached = advance(
+                net,
+                speed,
+                st.session_state.target,
+            )
+
             if reached:
-                label={'preview':'预览已实际到达','sos':'SOS 已实际送达','image':'原图已实际校验'}[st.session_state.target]
-                st.session_state.notice=label+' · 已自动暂停，可以讲解或继续'
-                st.session_state.playing=False
-                st.session_state.target=None
+                label = {
+                    "preview": "预览已实际到达",
+                    "sos": "SOS 已实际送达",
+                    "image": "原图已实际校验",
+                }[st.session_state.target]
+
+                st.session_state.notice = (
+                    label
+                    + " · 已自动暂停，可以讲解或继续"
+                )
+
+                st.session_state.playing = False
+                st.session_state.target = None
+
             elif not more:
-                st.session_state.playing=False
-                st.session_state.notice=('事件队列已结束，但未达到指定里程碑 · 请检查任务是否已提交或失败'
-                                         if st.session_state.target else '事件队列已完成 · 查看实际结果或重置场景')
-                st.session_state.target=None
+                st.session_state.playing = False
+
+                if st.session_state.target:
+                    st.session_state.notice = (
+                        "事件队列已结束，但未达到指定里程碑 · "
+                        "请检查任务是否已提交或失败"
+                    )
+                else:
+                    st.session_state.notice = (
+                        "事件队列已完成 · "
+                        "查看实际结果或重置场景"
+                    )
+
+                st.session_state.target = None
+
         except Exception as exc:
-            st.session_state.playing=False
-            st.error(f'运行失败，状态已保留：{exc}')
-    s=network_metrics(net)
-    metrics(net,s)
-    left,right=st.columns([1.55,1],gap='medium')
+            st.session_state.playing = False
+
+            st.error(
+                f"运行失败，状态已保留：{exc}"
+            )
+
+    summary = network_metrics(net)
+    metrics(net, summary)
+
+    left, right = st.columns(
+        [1.55, 1],
+        gap="medium",
+    )
+
     with left:
         with st.container(border=True):
-            heading('现场通信拓扑','STAR NETWORK / 8 DIRECTED CABLES')
-            html(topology_html(net))
-            html('<div class="network-foot"><span>静态地址转发 · 所有终端仅连接中心节点</span>'
-                 '<span><i class="legend-dot" style="background:#c95939"></i>DATA'
-                 '<i class="legend-dot" style="background:#2e7964"></i>控制帧</span></div>')
-        with st.container(border=True):
-            heading('关键事件','LIVE EVENT TIMELINE')
-            html(timeline_html(net,4 if recording else 5))
-    with right:
-        with st.container(border=True,key='receiver_panel'):
-            receiver(net)
-        with st.container(border=True):
-            inbox(net,2 if recording else 3)
-            if s['sos_latencies']:
-                html(f'<div class="notice">SOS 实际端到端时延 <b>{s["sos_latencies"][-1]:.3f}s</b> · 含发送与排队</div>')
-    live_noise=next(iter(net.links.values())).cable.noise_level
-    state='已停止' if net.closed else '运行中' if st.session_state.playing else '已暂停' if net.flows else '待命'
-    html(f'<div class="session-strip"><span><span class="pill">{state}</span> {escape(st.session_state.notice)}</span>'
-         f'<span>{net.config.modulation} / {net.config.transport} / {net.config.scheduler} · 当前 σ={live_noise:.2f}</span></div>')
-    if not recording or page=='Level 2 · 星形转发':
-        diagnostics(net,s,expanded=page=='Level 2 · 星形转发')
+            heading(
+                "现场通信拓扑",
+                "STAR NETWORK / 8 DIRECTED CABLES",
+            )
 
+            html(topology_html(net))
+
+            html(
+                '<div class="network-foot">'
+                "<span>"
+                "静态地址转发 · 所有终端仅连接中心节点"
+                "</span>"
+                "<span>"
+                '<i class="legend-dot" '
+                'style="background:#245d91"></i>'
+                "当前传输 · 灰色表示空闲链路"
+                "</span></div>"
+            )
+
+        with st.container(border=True):
+            heading(
+                "关键事件",
+                "LIVE EVENT TIMELINE",
+            )
+
+            html(
+                timeline_html(
+                    net,
+                    4 if recording else 5,
+                )
+            )
+
+    with right:
+        with st.container(
+            border=True,
+            key="receiver_panel",
+        ):
+            receiver(net)
+
+        with st.container(border=True):
+            inbox(
+                net,
+                2 if recording else 3,
+            )
+
+            if summary["sos_latencies"]:
+                latency = summary["sos_latencies"][-1]
+
+                html(
+                    '<div class="notice">'
+                    "SOS 实际端到端时延 "
+                    f"<b>{latency:.3f}s</b>"
+                    " · 含发送与排队"
+                    "</div>"
+                )
+
+    live_noise = (
+        next(iter(net.links.values()))
+        .cable.noise_level
+    )
+
+    if net.closed:
+        state = "已停止"
+    elif st.session_state.playing:
+        state = "运行中"
+    elif net.flows:
+        state = "已暂停"
+    else:
+        state = "待命"
+
+    html(
+        '<div class="session-strip">'
+        "<span>"
+        f'<span class="pill">{state}</span> '
+        f"{escape(st.session_state.notice)}"
+        "</span>"
+        "<span>"
+        f"{net.config.modulation} / "
+        f"{net.config.transport} / "
+        f"{net.config.scheduler}"
+        f" · 当前 σ={live_noise:.2f}"
+        "</span></div>"
+    )
+
+    if not recording or page == "Level 2 · 星形转发":
+        communication_evidence(net)
+
+        diagnostics(
+            net,
+            summary,
+            expanded=page == "Level 2 · 星形转发",
+        )
+
+
+# ============================================================
+# 里程碑暂停与信道干扰
+# ============================================================
 
 def task_controls():
-    net=st.session_state.net
-    with st.expander('演示控制 · 在真实接收节点暂停 / 注入信道干扰'):
-        st.caption('不会跳过传输。持续处理真实事件，达到指定接收节点时才自动暂停。')
-        cols=st.columns(5)
-        for col,label,target in zip(cols[:3],['推进至预览到达','推进至 SOS 送达','推进至原图校验'],['preview','sos','image']):
-            if col.button(label,disabled=net.closed,use_container_width=True):
-                st.session_state.target=target
-                st.session_state.playing=True
-                st.session_state.notice='正在推进至真实里程碑：'+label
+    net = st.session_state.net
+
+    with st.expander(
+        "演示控制 · 在真实接收节点暂停 / 注入信道干扰"
+    ):
+        st.caption(
+            "不会跳过传输。持续处理真实事件，"
+            "达到指定接收节点时才自动暂停。"
+        )
+
+        cols = st.columns(5)
+
+        milestones = [
+            ("推进至预览到达", "preview"),
+            ("推进至 SOS 送达", "sos"),
+            ("推进至原图校验", "image"),
+        ]
+
+        for col, (label, target) in zip(
+            cols[:3],
+            milestones,
+        ):
+            if col.button(
+                label,
+                disabled=net.closed,
+                use_container_width=True,
+            ):
+                st.session_state.target = target
+                st.session_state.playing = True
+
+                st.session_state.notice = (
+                    "正在推进至真实里程碑：" + label
+                )
+
                 st.rerun()
-        if cols[3].button('加入干扰 σ=0.85',disabled=net.closed,use_container_width=True):
-            net.set_noise(.85)
-            st.session_state.notice='即时干扰已施加到实际 Cable；当前播放状态保持'
-            st.rerun()
-        if cols[4].button('恢复链路 σ=0.12',disabled=net.closed,use_container_width=True):
-            net.set_noise(.12)
-            st.session_state.notice='实际 Cable 噪声已恢复至 0.12'
+
+        if cols[3].button(
+            "加入干扰 σ=0.85",
+            disabled=net.closed,
+            use_container_width=True,
+        ):
+            net.set_noise(0.85)
+
+            st.session_state.notice = (
+                "即时干扰已施加到实际 Cable；"
+                "当前播放状态保持"
+            )
+
             st.rerun()
 
+        if cols[4].button(
+            "恢复链路 σ=0.12",
+            disabled=net.closed,
+            use_container_width=True,
+        ):
+            net.set_noise(0.12)
+
+            st.session_state.notice = (
+                "实际 Cable 噪声已恢复至 0.12"
+            )
+
+            st.rerun()
+
+
+# ============================================================
+# 手动发送
+# ============================================================
 
 def composer():
-    net=st.session_state.net
-    with st.expander('手动任务 · 文字 / 状态查询 / 图片上传'):
-        left,right=st.columns(2,gap='large')
+    net = st.session_state.net
+
+    with st.expander(
+        "手动任务 · 文字 / 状态查询 / 图片上传"
+    ):
+        left, right = st.columns(
+            2,
+            gap="large",
+        )
+
         with left:
-            st.markdown('**发送消息**')
-            a,b=st.columns(2)
-            src=a.selectbox('发送方',list(HOSTS),format_func=HOSTS.get,index=0)
-            dst=b.selectbox('接收方',list(HOSTS),format_func=HOSTS.get,index=3)
-            text=st.text_area('UTF-8 文本','现场状态正常，等待指挥。',height=90)
-            a,b=st.columns(2)
-            if a.button('发送文本',disabled=net.closed,use_container_width=True):
-                st.session_state.counter+=1
-                net.send(src,dst,Message('TEXT',f'text-{st.session_state.counter}',{},text.encode()))
-                st.session_state.playing=True
+            st.markdown("**发送消息**")
+
+            a, b = st.columns(2)
+
+            src = a.selectbox(
+                "发送方",
+                list(HOSTS),
+                format_func=HOSTS.get,
+                index=0,
+            )
+
+            dst = b.selectbox(
+                "接收方",
+                list(HOSTS),
+                format_func=HOSTS.get,
+                index=3,
+            )
+
+            text = st.text_area(
+                "UTF-8 文本",
+                "现场状态正常，等待指挥。",
+                height=90,
+            )
+
+            a, b = st.columns(2)
+
+            if a.button(
+                "发送文本",
+                disabled=net.closed,
+                use_container_width=True,
+            ):
+                st.session_state.counter += 1
+
+                net.send(
+                    src,
+                    dst,
+                    Message(
+                        "TEXT",
+                        f"text-{st.session_state.counter}",
+                        {},
+                        text.encode(),
+                    ),
+                )
+
+                st.session_state.playing = True
                 st.rerun()
-            if b.button('查询状态',disabled=net.closed,use_container_width=True):
-                st.session_state.counter+=1
-                net.send(src,dst,Message('STATUS_QUERY',f'status-{st.session_state.counter}',{}))
-                st.session_state.playing=True
+
+            if b.button(
+                "查询状态",
+                disabled=net.closed,
+                use_container_width=True,
+            ):
+                st.session_state.counter += 1
+
+                net.send(
+                    src,
+                    dst,
+                    Message(
+                        "STATUS_QUERY",
+                        f"status-{st.session_state.counter}",
+                        {},
+                    ),
+                )
+
+                st.session_state.playing = True
                 st.rerun()
+
         with right:
-            st.markdown('**B → D 现场图像**')
-            upload=st.file_uploader('PNG / JPEG（≤512 KiB，≤400 万像素）',type=['png','jpg','jpeg'])
-            progressive=st.checkbox('预览优先（取消则仅发原图）',value=True)
-            if st.button('开始图片上传',disabled=net.closed,use_container_width=True):
+            st.markdown("**B → D 现场图像**")
+
+            upload = st.file_uploader(
+                "PNG / JPEG（≤512 KiB，≤400 万像素）",
+                type=["png", "jpg", "jpeg"],
+            )
+
+            progressive = st.checkbox(
+                "预览优先（取消则仅发原图）",
+                value=True,
+            )
+
+            if st.button(
+                "开始图片上传",
+                disabled=net.closed,
+                use_container_width=True,
+            ):
                 try:
-                    net.start_image(2,4,upload.getvalue() if upload else demo_image(),progressive)
-                    st.session_state.playing=False
-                    st.session_state.target=None
-                    st.session_state.notice='B → D 图像已提交 · 已暂停，可单步或推进至预览到达'
+                    image_data = (
+                        upload.getvalue()
+                        if upload
+                        else demo_image()
+                    )
+
+                    net.start_image(
+                        2,
+                        4,
+                        image_data,
+                        progressive,
+                    )
+
+                    st.session_state.playing = False
+                    st.session_state.target = None
+
+                    st.session_state.notice = (
+                        "B → D 图像已提交 · 已暂停，"
+                        "可单步或推进至预览到达"
+                    )
+
                     st.rerun()
+
                 except ValueError as exc:
                     st.error(str(exc))
-            st.caption('未选择文件时使用内置示例。上传后先暂停，便于逐步录制。')
 
+            st.caption(
+                "未选择文件时使用内置示例。"
+                "上传后先暂停，便于逐步录制。"
+            )
+
+
+# ============================================================
+# Level 1
+# ============================================================
 
 def level1_view():
-    st.session_state.playing=False
-    html('<div class="record-hint">LEVEL 1 / UTF-8 → 分片 → 调制 → Cable → 解调 → CRC → 重组。'
-         '这里是独立点对点信道，不经过交换机，也没有 ARQ 重传。</div>')
+    st.session_state.playing = False
+
+    html(
+        '<div class="record-hint">'
+        "LEVEL 1 / "
+        "UTF-8 → 分片 → 调制 → Cable → "
+        "解调 → CRC → 重组。"
+        "这里是独立点对点信道，"
+        "不经过交换机，也没有 ARQ 重传。"
+        "</div>"
+    )
+
     with st.container(border=True):
-        heading('点对点通信实验','A → B / ORIGINAL CABLE')
-        a,b=st.columns([2,1])
-        data=a.text_area('待传输文本','救援现场状态正常，正在通过有噪声的链路发送分片消息。'*12,height=100,max_chars=24000)
-        mode=b.selectbox('点对点保护',['Balanced','Fast','Survival'])
-        payload=b.select_slider('每片载荷字节',options=[64,128,256],value=128)
-        st.caption(f'新任务参数：{modulation} · 噪声标准差 {noise:.2f} · 种子 {int(seed)}')
-        a,b,c=st.columns(3)
-        if a.button('开始点对点传输',type='primary',use_container_width=True):
-            if 'p2p' in st.session_state:
+        heading(
+            "点对点通信实验",
+            "A → B / ORIGINAL CABLE",
+        )
+
+        a, b = st.columns([2, 1])
+
+        data = a.text_area(
+            "待传输文本",
+            (
+                "救援现场状态正常，"
+                "正在通过有噪声的链路发送分片消息。"
+            ) * 12,
+            height=100,
+            max_chars=24000,
+        )
+
+        mode = b.selectbox(
+            "点对点保护",
+            ["Balanced", "Fast", "Survival"],
+        )
+
+        payload = b.select_slider(
+            "每片载荷字节",
+            options=[64, 128, 256],
+            value=128,
+        )
+
+        st.caption(
+            f"新任务参数：{modulation}"
+            f" · 噪声标准差 {noise:.2f}"
+            f" · 种子 {int(seed)}"
+        )
+
+        a, b, c = st.columns(3)
+
+        if a.button(
+            "开始点对点传输",
+            type="primary",
+            use_container_width=True,
+        ):
+            if "p2p" in st.session_state:
                 st.session_state.p2p.close()
-            cfg=make_config()
-            cfg.payload=payload
-            st.session_state.p2p=PointToPointSession(data.encode(),cfg,mode)
-            st.session_state.p2p_playing=True
-        if b.button('点对点暂停 / 继续',use_container_width=True):
-            st.session_state.p2p_playing=not st.session_state.get('p2p_playing',False)
-        if c.button('单步发送一个分片',use_container_width=True):
-            st.session_state.p2p_playing=False
-            if 'p2p' in st.session_state:
+
+            config = make_config()
+            config.payload = payload
+
+            st.session_state.p2p = PointToPointSession(
+                data.encode(),
+                config,
+                mode,
+            )
+
+            st.session_state.p2p_playing = True
+
+        if b.button(
+            "点对点暂停 / 继续",
+            use_container_width=True,
+        ):
+            st.session_state.p2p_playing = (
+                not st.session_state.get(
+                    "p2p_playing",
+                    False,
+                )
+            )
+
+        if c.button(
+            "单步发送一个分片",
+            use_container_width=True,
+        ):
+            st.session_state.p2p_playing = False
+
+            if "p2p" in st.session_state:
                 st.session_state.p2p.step()
+
     point_monitor()
 
 
+# ============================================================
+# 离线实验
+# ============================================================
+
 def experiment_view():
-    st.session_state.playing=False
-    heading('实验结果与对照','RECORDED MEASUREMENTS')
-    path=ROOT/'outputs/experiments/results.json'
+    st.session_state.playing = False
+
+    heading(
+        "实验结果与对照",
+        "RECORDED MEASUREMENTS",
+    )
+
+    path = ROOT / "outputs/experiments/results.json"
+
     if not path.exists():
-        st.info('尚无实验结果。请先运行 python experiments/run_all.py --quick。')
+        st.info(
+            "尚无实验结果。请先运行 "
+            "python experiments/run_all.py --quick。"
+        )
         return
-    results=json.loads(path.read_text(encoding='utf-8'))
-    html(f'<div class="record-hint">以下为已保存的离线实验，并非当前场景的实时统计。生成于 '
-         f'{escape(results["generated_utc"])} · {"quick 小样本" if results["quick"] else "full"}。结论以实际数据为准。</div>')
-    options={'SOS 优先调度':'scheduling.png','自适应保护':'adaptive.png','多种调制':'e3_modulations.png',
-             '信道编码':'e4_coding.png','编码与有效速率':'e4_goodput.png','香农参考':'e2_shannon.png','停等与 GBN':'transport.png'}
-    selected=st.selectbox('对照实验',list(options))
-    chart=path.parent/options[selected]
+
+    results = json.loads(
+        path.read_text(encoding="utf-8")
+    )
+
+    experiment_mode = (
+        "quick 小样本"
+        if results["quick"]
+        else "full"
+    )
+
+    html(
+        '<div class="record-hint">'
+        "以下为已保存的离线实验，"
+        "并非当前场景的实时统计。生成于 "
+        f'{escape(results["generated_utc"])}'
+        f" · {experiment_mode}。"
+        "结论以实际数据为准。"
+        "</div>"
+    )
+
+    options = {
+        "SOS 优先调度": "scheduling.png",
+        "自适应保护": "adaptive.png",
+        "多种调制": "e3_modulations.png",
+        "信道编码": "e4_coding.png",
+        "编码与有效速率": "e4_goodput.png",
+        "香农参考": "e2_shannon.png",
+        "停等与 GBN": "transport.png",
+    }
+
+    selected = st.selectbox(
+        "对照实验",
+        list(options),
+    )
+
+    chart = path.parent / options[selected]
+
     if chart.exists():
         with st.container(border=True):
-            st.image(str(chart),use_container_width=True)
-    notes={'SOS 优先调度':'优先调度降低 SOS 排队，代价是普通图片可能更晚完成；不抢占已开始发送的帧。',
-           '自适应保护':'Auto 根据反馈切换保护，但不保证在每种场景下都优于固定策略。',
-           '香农参考':'原版 Cable 没有带宽参数。这里是明确假设下的参考，不等于已验证理想带限信道容量。',
-           '停等与 GBN':'统一模拟时钟比较网络效率；Python 计算运行耗时不是网络时延。'}
-    st.caption(notes.get(selected,'结合原始配置、样本量、能量与带宽条件解读，不只比较单个成功率。'))
-    st.download_button('下载离线实验 JSON',path.read_bytes(),'experiment_results.json',mime='application/json')
-    with st.expander('五分钟录制 / 现场展示顺序'):
-        st.markdown('1. **Level 1**：点对点页展示非零噪声、分片和恢复文本。\n'
-                    '2. **Level 2**：载入星形转发场景，展开链路详情，展示两跳 Cable 和目的地址。\n'
-                    '3. **Level 3 现场**：完整 Demo 推进至预览后暂停，再观察 SOS、保护切换和原图校验。\n'
-                    '4. **实验**：展示真实离线对照，并说明性能收益与代价。')
+            st.image(
+                str(chart),
+                use_container_width=True,
+            )
+
+    notes = {
+        "SOS 优先调度": (
+            "优先调度降低 SOS 排队，"
+            "代价是普通图片可能更晚完成；"
+            "不抢占已开始发送的帧。"
+        ),
+        "自适应保护": (
+            "Auto 根据反馈切换保护，"
+            "但不保证在每种场景下都优于固定策略。"
+        ),
+        "香农参考": (
+            "原版 Cable 没有带宽参数。"
+            "这里是明确假设下的参考，"
+            "不等于已验证理想带限信道容量。"
+        ),
+        "停等与 GBN": (
+            "统一模拟时钟比较网络效率；"
+            "Python 计算运行耗时不是网络时延。"
+        ),
+    }
+
+    st.caption(
+        notes.get(
+            selected,
+            "结合原始配置、样本量、能量与带宽条件解读，"
+            "不只比较单个成功率。",
+        )
+    )
+
+    st.download_button(
+        "下载离线实验 JSON",
+        path.read_bytes(),
+        "experiment_results.json",
+        mime="application/json",
+    )
+
+    with st.expander("五分钟录制 / 现场展示顺序"):
+        st.markdown(
+            "1. **Level 1**：点对点页展示非零噪声、"
+            "分片和恢复文本。\n"
+            "2. **Level 2**：载入星形转发场景，"
+            "展开链路详情，展示两跳 Cable 和目的地址。\n"
+            "3. **Level 3 现场**：完整 Demo 推进至预览后暂停，"
+            "再观察 SOS、保护切换和原图校验。\n"
+            "4. **实验**：展示真实离线对照，"
+            "并说明性能收益与代价。"
+        )
 
 
-if page=='Level 1 · 点对点':
+# ============================================================
+# 页面入口
+# ============================================================
+
+if page == "Level 1 · 点对点":
     level1_view()
-elif page=='实验与对照':
+
+elif page == "实验与对照":
     experiment_view()
+
 else:
-    if page=='Level 2 · 星形转发':
-        html('<div class="record-hint">LEVEL 2 / 源地址 → Switch 查表 → 目的端口。展开下方链路详情，查看真实帧头与各方向 Cable 调用。</div>')
-        if st.button('载入 Level 2 场景'):
+    if page == "Level 2 · 星形转发":
+        html(
+            '<div class="record-hint">'
+            "LEVEL 2 / "
+            "源地址 → Switch 查表 → 目的端口。"
+            "展开下方链路详情，"
+            "查看真实帧头与各方向 Cable 调用。"
+            "</div>"
+        )
+
+        if st.button("载入 Level 2 场景"):
             new_network()
-            n=st.session_state.net
-            n.send(1,4,Message('TEXT','level2-a-d',{},'A→D：现场状态正常。'.encode()))
-            n.send(3,2,Message('STATUS_QUERY','level2-c-b',{}))
-            st.session_state.notice='A→D 文本和 C→B 状态查询已提交 · 点击继续或单步'
+            net = st.session_state.net
+
+            net.send(
+                1,
+                4,
+                Message(
+                    "TEXT",
+                    "level2-a-d",
+                    {},
+                    "A→D：现场状态正常。".encode(),
+                ),
+            )
+
+            net.send(
+                3,
+                2,
+                Message(
+                    "STATUS_QUERY",
+                    "level2-c-b",
+                    {},
+                ),
+            )
+
+            st.session_state.notice = (
+                "A→D 文本和 C→B 状态查询已提交"
+                " · 点击继续或单步"
+            )
+
+            st.rerun()
+
     controls()
     network_monitor()
     task_controls()
