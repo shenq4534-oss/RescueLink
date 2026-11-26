@@ -19,7 +19,7 @@ def level1(data="Hello · 救援链路".encode(), noise=.15, payload=128, scheme
         for i, part in enumerate(parts):
             frame = Frame(Kind.DATA, 1, 4, 2, 1, i, i, len(parts), payload=part)
             r = link.transmit(frame.pack(), MODES[mode], scheme)
-            records.append({k:v for k,v in r.items() if k not in ("raw", "tx", "rx")})
+            records.append({k:v for k,v in r.items() if k not in ("raw", "tx", "rx", "tx_payload", "rx_payload")})
             if r["ok"]:
                 f = Frame.unpack(r["raw"])
                 restored = rx.add(f.index, f.count, f.payload)

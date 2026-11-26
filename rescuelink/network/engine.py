@@ -149,7 +149,7 @@ class Network:
         arrival = end + result["propagation"]
         if self.fault and self.fault(lane, frame, len(self.attempts)):
             result.update(ok=False, raw=None, error="test injected loss AFTER original Cable")
-        record = {k: v for k, v in result.items() if k not in ("tx", "rx", "raw", "trace")}
+        record = {k: v for k, v in result.items() if k not in ("tx", "rx", "tx_payload", "rx_payload", "raw", "trace")}
         record.update(start=self.now, end=end, arrival=arrival, lane=lane, mode=mode.name,
                       frame_type=frame.kind.name, src=frame.src, dst=frame.dst,
                       message_id=frame.message_id, sequence=frame.sequence, frame_bytes=len(frame.pack()),

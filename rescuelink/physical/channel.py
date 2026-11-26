@@ -69,7 +69,9 @@ class PhysicalLink:
                       samples=len(waveform), snr_linear=None, raw=None, post_errors=None,
                       duration=len(waveform)/SAMPLE_RATE*slowdown,
                       propagation=self.cable.get_propagation_delay(),
-                      tx=waveform[:512].tolist(), rx=received[:512].tolist())
+                      tx=waveform[:512].tolist(), rx=received[:512].tolist(),
+                      tx_payload=waveform[PREFIX_SAMPLES:PREFIX_SAMPLES+512].tolist(),
+                      rx_payload=received[PREFIX_SAMPLES:PREFIX_SAMPLES+512].tolist())
         try:
             decoded, stats, raw_rx, snr = decode(received, trace)
             result.update(corrected_codewords=stats.corrected_codewords,

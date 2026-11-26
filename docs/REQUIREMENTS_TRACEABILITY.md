@@ -26,8 +26,6 @@
 |统一时间/传播/占用|Clock、PhysicalLink、_dispatch|test_original_cable_all_modulations_and_modes；attempts start/end/arrival|模拟时间，非CPU秒|
 |Shannon/BER/FER/吞吐|simulation/metrics.py、experiments/run_all.py|E2–E7 JSON/CSV/PNG|已计算实验|
 |可用 UI / rerun / 清理|app.py|test_ui_send_step_reset、test_ui_showcase_and_response|运行/暂停/继续/停止/复位|
-|字节/位/编码/波形/接收字节逐层展示|ui/inspector.py、PhysicalLink.capture|test_ui_layer_lab_and_four_steps、test_level1_trace_utf8_fragment_reassembly|底层实验室四步骤|
-|Cable 实际调用及因果依赖验证|tests/test_trace.py|test_trace_observes_original_cable_call、test_receiver_uses_returned_waveform_not_original_bytes、test_zero_cable_output_cannot_deliver、test_switch_downlink_is_required|下载追踪JSON；逐帧追踪双跳关联|
 |5分钟中文讲稿/录屏脚本|docs/PRESENTATION_5MIN.md|3个 scripts 入口|完整 Demo|
 
 测试标记 `unit / integration / physical_channel` 可分别筛选，例如 `python -m pytest -m physical_channel -q`。界面 AppTest 不需要浏览器或已运行的 Streamlit 服务。

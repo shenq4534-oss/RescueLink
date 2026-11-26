@@ -34,7 +34,8 @@ def physical_sweep(quick):
                     for i in range(4 if quick else 40):
                         frame=Frame(Kind.DATA,1,4,2,1,payload=rng.bytes(128))
                         a=link.transmit(frame.pack(),modes[mode],scheme)
-                        attempts.append({k:v for k,v in a.items() if k not in ("raw","tx","rx")})
+                        attempts.append({k:v for k,v in a.items()
+                                         if k not in ("raw","tx","rx","tx_payload","rx_payload")})
                     m=physical_metrics(attempts)
                     m["link_goodput_bps"]=sum(a["ok"] for a in attempts)*128*8/m["total_airtime"]
                     # Equivalent illustrative lowpass bandwidth; Cable itself is not bandlimited.
