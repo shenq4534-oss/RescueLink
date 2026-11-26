@@ -172,51 +172,5 @@ def timeline_html(net, limit=6):
 
 
 def topology_html(net, compact=False):
-    """Highlight frames whose actual virtual transmission interval includes now."""
-    active = {}
-    for a in net.attempts:
-        if a["start"] <= net.now < a["end"]:
-            active[a["lane"]] = a
-    nodes = {1: (38, 33, "A", "状态终端", "STATUS"),
-             2: (38, 202, "B", "图像终端", "IMAGING"),
-             3: (548, 33, "C", "救援终端", "SOS"),
-             4: (548, 202, "D", "指挥中心", "COMMAND")}
-    lines, cards = [], []
-    for addr, (x, y, name, title, subtitle) in nodes.items():
-        left = addr <= 2
-        x1, y1, x2, y2 = (x+174, y+42, 316, 160) if left else (444, 160, x, y+42)
-        lanes = [f"up{addr}", f"down{addr}"]
-        selected = next((active[k] for k in lanes if k in active), None)
-        color = "#c95939" if selected and selected["frame_type"] == "DATA" else "#2e7964" if selected else "#cfd6cf"
-        lines.append(f'<path d="M{x1} {y1} L{x2} {y2}" stroke="{color}" stroke-width="{3 if selected else 1.5}"/>')
-        if selected:
-            lane = selected["lane"]
-            up = lane.startswith("up")
-            start = (x1,y1) if left == up else (x2,y2)
-            end = (x2,y2) if left == up else (x1,y1)
-            fraction = min(1, max(0, (net.now-selected["start"])/(selected["end"]-selected["start"])))
-            px=start[0]+(end[0]-start[0])*fraction
-            py=start[1]+(end[1]-start[1])*fraction
-            lines.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="5" fill="{color}"/>')
-        queued = sum(len(net.queues[k]) for k in lanes)
-        mode=net.controllers[f"down{addr}"].mode
-        status="已停止" if net.closed else "传输中" if selected else f"排队 {queued}" if queued else "就绪"
-        cards.append(f'<g><rect x="{x}" y="{y}" width="174" height="84" rx="10" fill="white" stroke="{color}"/>'
-                     f'<rect x="{x+12}" y="{y+14}" width="28" height="28" rx="7" fill="#f0f3ed"/>'
-                     f'<text x="{x+26}" y="{y+34}" text-anchor="middle" fill="#355b4c" font-size="15" font-weight="700">{name}</text>'
-                     f'<text x="{x+50}" y="{y+27}" font-size="14" font-weight="600" fill="#243d32">{title}</text>'
-                     f'<text x="{x+50}" y="{y+43}" font-size="9" letter-spacing="1" fill="#85918a">{subtitle}</text>'
-                     f'<circle cx="{x+18}" cy="{y+65}" r="3" fill="{color if selected else "#6f9a78"}"/>'
-                     f'<text x="{x+28}" y="{y+69}" font-size="11" fill="#718177">{status}</text>'
-                     f'<text x="{x+158}" y="{y+69}" text-anchor="end" font-size="10" fill="#85918a">{mode}</text></g>')
-    count=sum(l.calls for l in net.links.values())
-    center=(f'<rect x="316" y="117" width="128" height="88" rx="12" fill="#254e40"/>'
-            '<g stroke="#a5c4ad" stroke-width="1.5"><path d="M361 143h38m-5-5 5 5-5 5M399 157h-38m5-5-5 5 5 5"/></g>'
-            '<text x="380" y="180" text-anchor="middle" fill="white" font-size="14" font-weight="600">中央交换机</text>'
-            '<text x="380" y="194" text-anchor="middle" fill="#b8d0bf" font-size="9">ADDRESS → PORT</text>'
-            f'<text x="380" y="238" text-anchor="middle" fill="#819085" font-size="10">{count} 次真实 Cable 调用</text>')
-    return ('<div class="topology"><svg viewBox="0 0 760 313" role="img" aria-label="四主机星形网络实时状态">'
-            '<defs><pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse">'
-            '<circle cx="1" cy="1" r="0.65" fill="#dce1d8"/></pattern></defs>'
-            '<rect width="760" height="313" fill="url(#dots)"/>'
-            '<g fill="none">'+''.join(lines)+'</g>'+''.join(cards)+center+'</svg></div>')
+    from rescuelink.star_view import topology_html as draw_star
+    return draw_star(net, compact)

@@ -9,6 +9,7 @@ from pathlib import Path
 import json
 import threading
 import heapq
+import hashlib
 from rescuelink.config import Config, MODES, HOSTS
 from rescuelink.events import Event
 from rescuelink.physical.channel import PhysicalLink
@@ -153,7 +154,7 @@ class Network:
         record.update(start=self.now, end=end, arrival=arrival, lane=lane, mode=mode.name,
                       frame_type=frame.kind.name, src=frame.src, dst=frame.dst,
                       message_id=frame.message_id, sequence=frame.sequence, frame_bytes=len(frame.pack()),
-                      queue_wait=self.now-enqueued)
+                      queue_wait=self.now-enqueued, arrived=False)
         if "trace" in result:
             trace = result["trace"]
             trace.update(start=self.now, end=end, src=frame.src, dst=frame.dst,
@@ -171,9 +172,14 @@ class Network:
             self.stats["damaged_frames"] += 1
         self.log("physical_send", **record)
         self.clock.at(end, self._dispatch, lane)
-        self.clock.at(arrival, self._arrive, lane, result, frame.kind == Kind.LINK_REPORT)
+        self.clock.at(arrival, self._arrive, lane, result, frame.kind == Kind.LINK_REPORT, record)
 
-    def _arrive(self, lane, result, is_report):
+    def _arrive(self, lane, result, is_report, record=None):
+        # PHY calculation happens at dispatch; this callback is the receive boundary.
+        if record is not None:
+            record["arrived"] = True
+            self.log("physical_arrival", lane=lane, trace_id=result.get("trace_id"),
+                     ok=result["ok"], error=result["error"])
         self.activity_end = max(self.activity_end, self.now)
         if not is_report:
             self._send_link_report(lane, result)
@@ -192,6 +198,10 @@ class Network:
                 self.log("unknown_destination", dst=f.dst, message_id=f.message_id)
                 self.stats["unknown_destination"] += 1
             else:
+                self.log("switch_forward", ingress=lane, egress=f"down{f.dst}",
+                         src=f.src, dst=f.dst, message_id=f.message_id,
+                         sequence=f.sequence, frame_type=f.kind.name,
+                         frame_sha256=hashlib.sha256(result["raw"]).hexdigest())
                 self._enqueue(f"down{f.dst}", f)
         else:
             if f.dst != int(lane[4:]):

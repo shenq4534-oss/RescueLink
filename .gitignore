@@ -8,3 +8,4 @@ outputs/ui*/
 *.log
 .pytest_tmp/
 .repair_backup/
+outputs/pytest_tmp_*/
